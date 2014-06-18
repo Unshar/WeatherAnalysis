@@ -1,0 +1,223 @@
+---
+title: "Analysis of the top 20 weather events of the 21st Century"
+author: "by MissK"
+date: "June 18, 2014"
+output: html_document
+---
+
+##Synopsis
+Storms and other severe weather events can cause both public health and economic problems for communities and municipalities. Many severe events can result in fatalities, injuries, and property damage, and preventing such outcomes to the extent possible is a key concern.
+
+This analysis involves exploring the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database and identify the top 20 weather events occurred since Jan 1, 2001. 
+
+The NOAA storm database tracks characteristics of major storms and weather events in the United States, including when and where they occur, as well as estimates of any fatalities, injuries, and property damage.
+
+This data analysis addressses the following questions:
+
+- Across the United States, which types of events are most harmful with respect to population health?
+
+- Across the United States, which types of events have the greatest economic consequences?
+
+##Analysis
+###[Q1]: which types of events are most harmful with respect to population health?
+
+####[Q1] Data Processing
+
+#####Install function for required packages 
+```{r loadpkg, echo=TRUE}
+   
+packages<-function(x){
+  x<-as.character(match.call()[[2]])
+  if (!require(x,character.only=TRUE)){
+    install.packages(pkgs=x,repos="http://cran.r-project.org")
+    require(x,character.only=TRUE)
+  }
+}
+packages(lubridate)
+packages(ggplot2)
+packages(reshape)
+```
+#####Load Data & Extract 21st Century set
+```{r loaddata, echo=TRUE, cache=TRUE}
+dir<-getwd()
+path<-paste(c(dir,"/Data/repdata-data-StormData.csv.bz2"), collapse='')
+temp<-read.csv(path, stringsAsFactors = FALSE, 
+                   strip.white = TRUE, na.strings = c("NA",""))
+
+#Extract from master file only the observations related to 21st Century
+temp$BGN_DATE2<-as.Date(temp$BGN_DATE,format="%m/%d/%Y")
+mydata<-subset(temp, temp$BGN_DATE2>="2001-01-01")
+```
+#####Format, aggregate data to identify top 20 most harmful weather events
+for this excercise fatality is being considered a more harmul casualty and therefore having a weight of 2.
+```{r formatdataharmful, echo=TRUE, cache=TRUE}
+#Create weighted Fatalities variable
+mydata$xFatality<-2*mydata$FATALITIES
+
+#Add up fatalities and injuries
+mydata$xHarm<-mydata$xFatality + mydata$INJURIES
+
+#Create a year field for aggregation
+mydata$xYear<-year(mydata$BGN_DATE2)
+
+#Aggregate by Event Type and year
+SumbyEventYear <-aggregate(cbind(xHarm, xFatality, INJURIES) ~ xYear + EVTYPE, data = mydata, sum, na.rm=TRUE)
+
+#Aggregate by Event Type only
+SumbyEvent <-aggregate(cbind(xHarm, xFatality, INJURIES) ~ EVTYPE, data = mydata, sum, na.rm=TRUE)
+
+#Sort Summaries on Total score for harm
+SortDataYear<-SumbyEventYear[order(-SumbyEventYear$xHarm),] 
+SortDataEvent<-SumbyEvent[order(-SumbyEvent$xHarm),] 
+
+#Extract Top 20
+Top20Events<-SortDataEvent[1:20,c("EVTYPE","xFatality","INJURIES") ]
+MeltedTop20 <- melt(Top20Events, id=c("EVTYPE")) 
+
+# Find The Most harmful event
+        n <- length(MeltedTop20$value)
+        y<-sort(MeltedTop20$value,partial=n-0)[n-0]
+        x<-subset(MeltedTop20,MeltedTop20$value==y)
+        z<-x[1,1]
+        mostharmful<-substr(z,1,10)
+        p2title<-paste(c(mostharmful," - The most harmful weather event by year"),collapse='')
+
+          #Extract data by year only for the most harmful event        
+          DataMostHarmful<-subset(SortDataYear[,c("xYear","EVTYPE","xFatality","INJURIES")], EVTYPE==mostharmful)
+          
+```
+
+####[Q1] Results
+
+>Based on the analysis, Tornado is by far the most harmful weather event, causing the most casualties in the 21st Century, specially in 2011. According to Wikepedia, there were 1,897 tornadoes reported in the US in 2011 (of which 1,704 were confirmed). 2011 was an exceptionally destructive and deadly year for tornadoes; worldwide, at least 577 people perished due to tornadoes: 12 in Bangladesh, two in South Africa, one in New Zealand, one in the Philippine>s, one in Russia, one in Canada, and an estimated 553 in the United States (compared to 564 US deaths in the prior ten years combined).[3]
+
+>See plot below for results:
+
+```{r resultharmful, echo=TRUE}
+#Create Stacked bar graph
+    p<-ggplot(data = MeltedTop20, aes(EVTYPE, value)) + 
+    geom_bar(aes(fill=variable), stat="identity", group=1)+theme(axis.text.x=element_text(angle = -90, hjust = 0))
+    p<-p + labs(title = "Top 20 most harmful weather events of the 21st Century", x = "Events", y = "Harm Score (Injuries + Weighted Fatalities)")+scale_fill_discrete("Casualties", 
+                      breaks=c("xFatality","INJURIES"), 
+                      labels=c("directly killed", "directly injured"))
+
+#Melt data and creat line graph by year
+          MeltedMostHarmful <- melt(DataMostHarmful, id=c("xYear","EVTYPE"))  
+          p2 <- ggplot(MeltedMostHarmful, aes(x=as.character(xYear),y=value, group=variable, colour=variable)) + geom_line() + theme(legend.position = "bottom") 
+          p2<-p2 + labs(title = p2title, x = "Year", y = "Harm Score (Injuries + Weighted Fatalities)")
+          p2<-p2 + theme(legend.position="none")
+
+#Display stacked bar graph
+p
+
+#Display Line graph
+p2
+```
+
+###[Q2]: which types of events have the greatest economic consequences?
+
+####[Q2] Data Processing
+```{r formatdatadamage, echo=TRUE, cache=TRUE}
+# set any NAs in the exponent section of costs to = 0 
+mydata$PROPDMGEXP[is.na(mydata$PROPDMGEXP)] <- 0
+mydata$CROPDMGEXP[is.na(mydata$CROPDMGEXP)] <- 0
+
+#For some weird reason ifelse does not want to work!
+#So here is my very basic workaround, not the ideal but it works!
+
+#Aggregate by Event Type and year
+SumPROPEventYear <-aggregate(PROPDMG ~ xYear + EVTYPE + PROPDMGEXP, data = mydata, sum, na.rm=TRUE)
+SumCROPEventYear <-aggregate(CROPDMG ~ xYear + EVTYPE + CROPDMGEXP, data = mydata, sum, na.rm=TRUE)
+
+xPROPK<-subset(SumPROPEventYear, PROPDMGEXP=="K")
+xPROPM<-subset(SumPROPEventYear, PROPDMGEXP=="M")
+xPROPB<-subset(SumPROPEventYear, PROPDMGEXP=="B")
+xPROPK$CashDmg<-xPROPK$PROPDMG*10^3
+xPROPM$CashDmg<-xPROPM$PROPDMG*10^6
+xPROPB$CashDmg<-xPROPB$PROPDMG*10^9
+
+xCROPK<-subset(SumCROPEventYear, CROPDMGEXP=="K")
+xCROPM<-subset(SumCROPEventYear, CROPDMGEXP=="M")
+xCROPB<-subset(SumCROPEventYear, CROPDMGEXP=="B")
+xCROPK$CashDmg<-xCROPK$CROPDMG*10^3
+xCROPM$CashDmg<-xCROPM$CROPDMG*10^6
+xCROPB$CashDmg<-xCROPB$CROPDMG*10^9
+
+MyPROPDMGData<-rbind(xPROPK, xPROPM, xPROPB)
+MyCROPDMGData<-rbind(xCROPK, xCROPM, xCROPB)
+
+x<-MyPROPDMGData[,c("xYear","EVTYPE", "CashDmg")]
+x$DMG<-c("Property")
+
+y<-MyCROPDMGData[,c("xYear","EVTYPE", "CashDmg")]
+y$DMG<-c("Crop")
+
+z<-rbind(x,y)
+MyDMGDatabyYear<-aggregate(CashDmg ~ xYear + EVTYPE + DMG, data = z, sum, na.rm=TRUE)
+MyDMGData<-aggregate(CashDmg ~ EVTYPE + DMG, data = z, sum, na.rm=TRUE)
+
+#Sort Summaries on Total damage
+SortDataYear<-MyDMGDatabyYear[order(-MyDMGDatabyYear$CashDmg),] 
+SortDataEvent<-MyDMGData[order(-MyDMGData$CashDmg),] 
+
+#Extract Top 20
+Top20Events<-SortDataEvent[1:20,c("EVTYPE","DMG","CashDmg") ]
+
+#Create Events by year graph
+# Find event that caused most damage
+n <- length(Top20Events$CashDmg)
+y<-sort(Top20Events$CashDmg,partial=n-0)[n-0]
+x<-subset(Top20Events,Top20Events$CashDmg==y)
+z<-x[1,1]
+mostdmg<-substr(z,1,10)
+p4title<-paste(c(mostdmg," - event that caused most damage by year"),collapse='')
+
+#Extract data by year only for event that caused most damage    
+DataMostDmg<-subset(SortDataYear[,c("xYear","EVTYPE","DMG","CashDmg")], EVTYPE==mostdmg)
+x<-aggregate(CashDmg ~ xYear + DMG, data = DataMostDmg, sum, na.rm=TRUE)
+
+#Create total damage for Crops
+yCrop<-subset(x,DMG=="Crop")
+TotalDmgCrop<-aggregate(CashDmg ~ DMG, data = yCrop, sum, na.rm=TRUE)
+TotalDmgCrop$CashDmg<-format(TotalDmgCrop$CashDmg/10^9, digits=9, decimal.mark=",",big.mark=" ",small.mark=".", small.interval=3)
+zTotalDmgCrop<-TotalDmgCrop[1,2]
+
+#Create total damage for Properties
+yProp<-subset(x,DMG=="Property")
+TotalDmgProp<-aggregate(CashDmg ~ DMG, data = yProp, sum, na.rm=TRUE)
+TotalDmgProp$CashDmg<-format(TotalDmgProp$CashDmg/10^9, digits=9, decimal.mark=",",big.mark=" ",small.mark=".", small.interval=3)
+zTotalDmgProp<-TotalDmgProp[1,2]
+```
+
+
+####[Q2] Results
+
+>Based on the analysis, Flood was the event that caused most economic damage, specially in 2006. This was due to the Mid-Atlantic United States flood of 2006, which was a significant flood that affected much of the Mid-Atlantic region of the eastern United States. The flooding was very widespread, affecting numerous rivers, lakes and communities from upstate New York to North Carolina. It was widely considered to be the worst flooding in the region since Hurricane David in 1979. It was also one of the worst floodings in the United States since Hurricane Katrina in August 2005. 
+
+>Total damage to Crops was $`r zTotalDmgCrop` billions, while total damage to properties was $`r zTotalDmgProp` billions.
+
+
+```{r resultsdamage, echo=TRUE}
+#Create Stacked bar graph
+p3<-ggplot(data = Top20Events, aes(EVTYPE, (CashDmg/10^9))) + 
+  geom_bar(aes(fill=DMG), stat="identity", group=1)+theme(axis.text.x=element_text(angle = -90, hjust = 0))
+p3<-p3 + labs(title = "Top 20 weather events of the 21st Century with the greatest economic consequences", x = "Events", y = "Damage in Billions of Dollars")+scale_fill_discrete("Damage")
+#Display stacked bar graph
+p3
+```
+
+#####Summary by year (flood only - in Billions of Dollars)
+```{r resultsdamageyear, echo=TRUE}
+x$CashDmg<-format(x$CashDmg/10^9, digits=9, decimal.mark=",",big.mark=" ",small.mark=".", small.interval=3)
+colnames(x) <- c("Year", "Type of Damage","$Damage")
+x
+```
+
+### References
+*[3]Annual Fatal Tornado Summaries". Storm Prediction Center. National Oceanic and Atmospheric Administration. September 2, 2011. Retrieved April 5, 2012.*
+
+[Wikepdia - Flood ](http://en.wikipedia.org/wiki/Mid-Atlantic_United_States_flood_of_2006)
+
+[Wikepdia - Tornado ](http://en.wikipedia.org/wiki/Tornadoes_of_2011)
+
+[NOAA](http://www.erh.noaa.gov/bgm/WeatherEvents/Flood/june2006/)
